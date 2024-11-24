@@ -8,7 +8,11 @@ import {
 import { Product } from "../models/product.js";
 import ErrorHandler from "../utils/utility-class.js";
 import { rm } from "fs";
-import { invalidateCache, validateCache } from "../utils/features.js";
+import cloudinary, {
+  invalidateCache,
+  validateCache,
+} from "../utils/features.js";
+import { uploadFile } from "../middlewares/multer.js";
 
 export const newProduct = TryCatch(
   async (req: Request<{}, {}, NewProductRequestBody>, res, next) => {
@@ -20,12 +24,13 @@ export const newProduct = TryCatch(
       rm(photo.path, () => console.log("deleted"));
       return next(new ErrorHandler("Please enter all Fields", 400));
     }
+    const upload = await uploadFile(photo.path);
     await Product.create({
       name,
       price,
       stock,
       category: category.toLowerCase(),
-      photo: photo.path,
+      photo: upload?.secure_url,
     });
 
     invalidateCache({ product: true, admin: true });
@@ -86,9 +91,15 @@ export const updateProduct = TryCatch(async (req, res, next) => {
   const product = await Product.findById(id);
   if (!product) return next(new ErrorHandler("Product not Found", 404));
 
+  if (product.photo) {
+    const publicId = product.photo.split("/").pop()?.split(".")[0] as string;
+    await cloudinary.uploader.destroy(publicId);
+  }
+
   if (photo) {
     rm(product.photo!, () => console.log("old photo deleted"));
-    product.photo = photo.path;
+    const upload = await uploadFile(photo.path);
+    product.photo = upload?.secure_url as string;
   }
 
   if (name) product.name = name;
@@ -115,6 +126,10 @@ export const deleteProduct = TryCatch(async (req, res, next) => {
   const product = await Product.findById(id);
   if (!product) return next(new ErrorHandler("Product not Found", 404));
   rm(product.photo!, () => console.log("product photo deleted"));
+  if (product.photo) {
+    const publicId = product.photo.split("/").pop()?.split(".")[0] as string; 
+    await cloudinary.uploader.destroy(publicId);
+  }
   await product.deleteOne();
   invalidateCache({
     product: true,
